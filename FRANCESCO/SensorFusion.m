@@ -1,7 +1,7 @@
 % Attitude determination via sensor fusion (Kalman-ready setup)
 % External sensors  : Sun + Horizon (Euler angles ZYX)
 % Internal sensors  : Gyros (angular velocity body frame)
-% Computations done in quaternions
+% Computations done in quaternions.
 
 close all; clear; clc;
 format long;
