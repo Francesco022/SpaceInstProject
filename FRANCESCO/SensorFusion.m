@@ -3,135 +3,184 @@
 % Internal sensors  : Gyros (angular velocity body frame)
 % Computations done in quaternions.
 
+% ========================================================================
+% Multi-rate MEKF Attitude Determination with Gyro Bias
+% ========================================================================
+
 close all; clear; clc;
 format long;
 
-%% ========================================================================
-%  Sampling and time definition
-% =========================================================================
-
-N = 1000;          % Number of samples
-T = 5400;          % Total time [s]
-t = linspace(0,T,N)';   % Time vector [Nx1]
-
+rng(1);   % reproducibility
 
 %% ========================================================================
-%  External measurements (Euler angles ZYX)
-% =========================================================================
-% extMeas_e : [psi theta phi] [rad]  (Nx3)
-% extMeas   : {time, Euler}          (Nx2 cell)
+% Sampling parameters
+% ========================================================================
 
-extMeas_e = zeros(N,3);   % Placeholder (external attitude measurements)
+f_gyro = 100;      % [Hz]
+f_ext  = 1;        % [Hz]
 
-extMeas = cell(N,2);
-extMeas(:,1) = num2cell(t);                                   % Time
-extMeas(:,2) = mat2cell(extMeas_e, ones(N,1), 3);             % Euler angles
+dt = 1/f_gyro;
+T  = 6000;          % [s]
+N  = T*f_gyro;
 
-
-%% ========================================================================
-%  Internal measurements (Gyro angular velocity)
-% =========================================================================
-% intMeas_w : [wz wy wx] [rad/s] (Nx3)
-% intMeas   : {time, omega}     (Nx2 cell)
-
-intMeas_w = zeros(N,3);   % Placeholder (gyro measurements)
-
-intMeas = cell(N,2);
-intMeas(:,1) = num2cell(t);                                   % Time
-intMeas(:,2) = mat2cell(intMeas_w, ones(N,1), 3);             % Angular velocity
-
+t = (0:N-1)'*dt;
+ext_step = f_gyro / f_ext;
 
 %% ========================================================================
-%  Initial satellite attitude
-% =========================================================================
-% Euler angles [Z Y X] (yaw, pitch, roll)
+% TRUE dynamics
+% ========================================================================
 
-eul_0 = [0 0 0];               % Initial attitude [rad]
-q0 = eul2quat(eul_0, 'ZYX');   % Initial quaternion
+w_true = [1e-6 0 0];           % true angular rate [rad/s]
+b_true = [5e-7 -3e-7 2e-7];    % true gyro bias [rad/s]
 
 %% ========================================================================
-%  Attitude integration (gyro propagation)
-% =========================================================================
+% Sensor noise
+% ========================================================================
 
-% Preallocate output attitude (quaternions)
-attitude = cell(N,2);
-attitude{1,1} = t(1);
-attitude{1,2} = q0;
+sigma_g    = 2.62e-4;     % gyro noise [rad/s]
+sigma_b    = 2e-6;     % bias RW (filter)
+sigma_meas = 1e-3;     % external attitude noise [rad]
 
-q = q0;
+%% ========================================================================
+% Simulated measurements
+% ========================================================================
+
+% Gyro measurements
+intMeas_w = repmat(w_true, N, 1) ...
+            + repmat(b_true, N, 1) ...
+            + sigma_g*randn(N,3);
+
+% External attitude (Euler ZYX)
+extMeas_e = zeros(N,3);
+for k = 2:N
+    extMeas_e(k,:) = extMeas_e(k-1,:) + w_true*dt;
+end
+extMeas_e = extMeas_e + sigma_meas*randn(N,3);
+
+%% ========================================================================
+% Initial attitude
+% ========================================================================
+
+q = eul2quat([0 0 0],'ZYX');
+
+%% ========================================================================
+% MEKF initialization
+% ========================================================================
+
+x = zeros(6,1);    % [delta_theta; bias]
+P = blkdiag(1e-6*eye(3), 1e-8*eye(3));
+
+Q = diag([sigma_g^2*ones(1,3), sigma_b^2*ones(1,3)]);
+R = sigma_meas^2 * eye(3);
+
+%% ========================================================================
+% Storage
+% ========================================================================
+
+attitude = zeros(N,4);
+bias_est = zeros(N,3);
+
+attitude(1,:) = q;
+bias_est(1,:) = x(4:6)';
+
+%% ========================================================================
+% Main loop
+% ========================================================================
 
 for k = 2:N
 
-    % Time step
-    dt = intMeas{k,1} -intMeas{k-1,1};
-    
-    % Angular velocities
-    w1 = intMeas{k-1,2};   % omega at k-1
-    w2 = intMeas{k,2};     % omega at k
-    
-    % Omega matrices
-    Omega1 = [  0    -w1(1) -w1(2) -w1(3);
-               w1(1)   0     w1(3) -w1(2);
-               w1(2) -w1(3)   0     w1(1);
-               w1(3)  w1(2) -w1(1)   0  ];
-           
-    Omega2 = [  0    -w2(1) -w2(2) -w2(3);
-               w2(1)   0     w2(3) -w2(2);
-               w2(2) -w2(3)   0     w2(1);
-               w2(3)  w2(2) -w2(1)   0  ];
-    
-    % Quaternion derivatives
-    qdot1 = 0.5 * q * Omega1';
-    
-    % Predictor (Euler step)
-    q_pred = q + qdot1 * dt;
-    
-    % Derivative at predicted step
-    qdot2 = 0.5 * q_pred * Omega2';
-    
-    % Trapezoidal integration
-    q = q + 0.5 * (qdot1 + qdot2) * dt;
-    
-    % Normalize quaternion
-    q = q / norm(q);
-    
-    % Debug
-    % disp(norm(q));
-    
-    % Store
-    attitude{k,1} = intMeas{k,1};
-    attitude{k,2} = q;
+    %% Bias-corrected gyro
+    w_meas = intMeas_w(k,:)';
+    b_hat  = x(4:6);
+    w = w_meas - b_hat;
+
+    %% Quaternion propagation
+    Omega = [  0    -w(1) -w(2) -w(3);
+              w(1)   0     w(3) -w(2);
+              w(2) -w(3)   0     w(1);
+              w(3)  w(2) -w(1)   0  ];
+
+    qdot = 0.5 * q * Omega';
+    q = q + qdot * dt;
+    q = quatnormalize(q);
+
+    %% MEKF propagation
+    F = [ -skew(w)   -eye(3);
+           zeros(3)   zeros(3) ];
+
+    Phi = eye(6) + F*dt;
+
+    x = Phi*x;
+    P = Phi*P*Phi' + Q*dt;
+
+    %% Measurement update (low-rate)
+    if mod(k, ext_step) == 0
+
+        q_meas = eul2quat(extMeas_e(k,:),'ZYX');
+        q_err  = quatmultiply(q_meas, quatinv(q));
+        z = 2*q_err(2:4)';
+
+        H = [eye(3) zeros(3)];
+
+        K = P*H'/(H*P*H' + R);
+        x = x + K*(z - H*x);
+        P = (eye(6) - K*H)*P;
+
+        %% Quaternion correction
+        delta_q = [1;
+                   0.5*x(1);
+                   0.5*x(2);
+                   0.5*x(3)]';
+
+        q = quatmultiply(q, delta_q);
+        q = quatnormalize(q);
+
+        x(1:3) = 0;
+    end
+
+    attitude(k,:) = q;
+    bias_est(k,:) = x(4:6)';
+end
+
+%% ========================================================================
+% ============================= PLOTS =====================================
+% ========================================================================
+
+% Quaternion
+figure;
+plot(t, attitude, 'LineWidth',1.1)
+grid on
+title('Estimated Quaternion')
+legend('q_0','q_1','q_2','q_3')
+
+% Euler angles
+eul = quat2eul(attitude,'ZYX');
+figure;
+plot(t, rad2deg(eul),'LineWidth',1.2)
+grid on
+title('Estimated Euler Angles [deg]')
+legend('\psi','\theta','\phi')
+
+% Bias estimation
+figure;
+plot(t, bias_est,'LineWidth',1.2)
+hold on
+yline(b_true(1),'--'), yline(b_true(2),'--'), yline(b_true(3),'--')
+grid on
+title('Gyro Bias Estimation')
+legend('b_x','b_y','b_z','true b_x','true b_y','true b_z')
+
+%% ========================================================================
+% Utility
+% ========================================================================
+
+function S = skew(w)
+S = [  0   -w(3)  w(2);
+      w(3)   0   -w((1));
+     -w(2)  w(1)   0  ];
 end
 
 
-%% ========================================================================
-%  Plot attitude
-% =========================================================================
-
-% Extract time and quaternion history
-t_att = cell2mat(attitude(:,1));      % Nx1
-q_att = cell2mat(attitude(:,2));      % Nx4
-
-figure;
-
-subplot(4,1,1)
-plot(t_att, q_att(:,1), 'LineWidth', 1.2)
-grid on
-ylabel('q_0')
-title('Quaternion propagation (gyro only)')
-
-subplot(4,1,2)
-plot(t_att, q_att(:,2), 'LineWidth', 1.2)
-grid on
-ylabel('q_1')
-
-subplot(4,1,3)
-plot(t_att, q_att(:,3), 'LineWidth', 1.2)
-grid on
-ylabel('q_2')
-
-subplot(4,1,4)
-plot(t_att, q_att(:,4), 'LineWidth', 1.2)
-grid on
-ylabel('q_3')
-xlabel('Time [s]')
+%% REFERENCES TRACK:
+%   - Quaternion kinematics for the error-state KF
+%   - Kalman Filtering for Attitude Estimation with Quaternions and Concepts from Manifold Theory
