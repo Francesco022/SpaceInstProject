@@ -30,7 +30,7 @@ classdef Sensor < handle
             obj.position = pos_0;
             obj.attitude = quaternion(deg2rad(eul_0), 'euler', 'ZYX', 'frame');
             obj.fov = fov;
-            obj.noise = noise;
+            obj.noise = deg2rad(noise);
             % Default cube body
             if nargin < 6 || isempty(body)
                 l = 0.2;  % cube edge
@@ -123,7 +123,7 @@ classdef Sensor < handle
             end
 
             % Create noise
-            etha = obj.noise(1) * randn(1,2) + [obj.noise(2), 0];
+            etha = obj.noise(1) * randn(1,2) + 3*[obj.noise(2), 0];
 
             Par=[0;0;1]; % vettore costruzione non parallelo alla direzione nominale
             Nom_dir=[x; y; z]; % direzione nominale del sensore
