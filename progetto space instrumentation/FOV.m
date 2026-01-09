@@ -1,0 +1,78 @@
+% clc; clear; close all;
+clc; clear; close all;
+
+% Parametri FOV
+theta_x_max = deg2rad(10); % half-width
+theta_y_max = deg2rad(8);  % half-height
+R = 1; % raggio della sfera unitario
+
+% Vettore fisso da osservare (nel frame inerte)
+v_fixed = [0.1; -0.97; 0.97]; 
+v_fixed = v_fixed / norm(v_fixed);
+
+% Rotazione del sensore
+tspan = linspace(0, 0.5, 500); % simulazione
+omega_rot = pi; % velocità angolare rad/step
+
+% Rettangolo FOV sulla sfera
+[Xf, Yf] = meshgrid(linspace(-tan(theta_x_max), tan(theta_x_max), 20), ...
+                    linspace(-tan(theta_y_max), tan(theta_y_max), 20));
+Zf = ones(size(Xf));
+norm_f = sqrt(Xf.^2 + Yf.^2 + Zf.^2);
+Xf = Xf ./ norm_f; Yf = Yf ./ norm_f; Zf = Zf ./ norm_f;
+
+% Plot iniziale
+figure('Color','w'); hold on; axis equal;
+xlabel('X'); ylabel('Y'); zlabel('Z');
+grid on; view(3);
+[Xs,Ys,Zs] = sphere(50);
+surf(Xs,Ys,Zs,'FaceAlpha',0.1,'EdgeColor','none','FaceColor',[0.8 0.8 0.8]);
+
+hFOV = surf(Xf,Yf,Zf,'FaceAlpha',0.5,'FaceColor','cyan','EdgeColor','none');
+hVec = quiver3(0,0,0,0,0,0,'r','LineWidth',2,'MaxHeadSize',0.5);
+hText = text(0.5,0.5,1.1,'','FontSize',12,'Color','m');
+
+hX = quiver3(0,0,0,1,0,0,'k','LineWidth',1);
+hY = quiver3(0,0,0,0,1,0,'k','LineWidth',1);
+hZ = quiver3(0,0,0,0,0,1,'k','LineWidth',1);
+
+
+
+axes_orig = eye(3); % X=[1;0;0], Y=[0;1;0], Z=[0;0;1]
+
+% Ciclo animazione
+for k = 1:length(tspan)
+    angle = omega_rot * tspan(k);
+    R_sensor = [1 0 0;
+                0 cos(angle) -sin(angle);
+                0 sin(angle) cos(angle)];
+    
+    % Ruota FOV
+    FOV_rot = R_sensor * [Xf(:)'; Yf(:)'; Zf(:)'];
+    set(hFOV,'XData',reshape(FOV_rot(1,:),size(Xf)), ...
+             'YData',reshape(FOV_rot(2,:),size(Yf)), ...
+             'ZData',reshape(FOV_rot(3,:),size(Zf)));
+    
+    % Trasforma vettore fisso nel frame sensore
+    v_sensor = R_sensor' * v_fixed;
+    theta_x = atan2(v_sensor(1), v_sensor(3));
+    theta_y = atan2(v_sensor(2), v_sensor(3));
+    visible = (abs(theta_x) <= theta_x_max) && (abs(theta_y) <= theta_y_max) && (v_sensor(3) > 0);
+    set(hVec,'UData',v_fixed(1),'VData',v_fixed(2),'WData',v_fixed(3));
+    if visible
+        hText.String = sprintf('\\alpha_{XZ}=%.2f°\n\\alpha_{YZ}=%.2f°',rad2deg(theta_x),rad2deg(theta_y));
+    else
+        hText.String = 'NOT in the FOV';
+    end
+    
+   rotX = R_sensor * axes_orig(:,1);
+rotY = R_sensor * axes_orig(:,2);
+rotZ = R_sensor * axes_orig(:,3);
+
+set(hX,'UData',rotX(1),'VData',rotX(2),'WData',rotX(3));
+set(hY,'UData',rotY(1),'VData',rotY(2),'WData',rotY(3));
+set(hZ,'UData',rotZ(1),'VData',rotZ(2),'WData',rotZ(3));
+
+    drawnow
+    pause(1e-8)
+end
