@@ -17,7 +17,7 @@ satellite = Satellite(pos0,eul0);
 % Sensor 1 (Horizon Sensor)
 pos = [0;0;1];    % Sensor position wrt sat body frame [x;y;z]
 eul = [0 -90 0];      % Sensor attitude wrt sat body frame ZYX [deg]
-fov = [200, 200];          % Field of view [degxdeg]
+fov = [30, 30];          % Field of view [degxdeg]
 noise = [0.042, 0.06]./3;      % Sensor noise characteristics [WN, bias] [deg]
 sensor1 = Sensor(satellite, pos, eul, fov, noise);
 % Sensor 2 (Sun Sensor 1)
@@ -49,10 +49,10 @@ sensor5 = Sensor(satellite, pos, eul, fov, noise);
 %% Simulation loop
 startTime = datetime(2026,3,20,0,0,0);
 endTime   = datetime(2026,3,20,1,0,0);
-timeStep  = seconds(1);
+numSteps = 500;
 
-timeVector = linspace(startTime, endTime, 100);
-numSteps   = length(timeVector);
+timeVector = linspace(startTime, endTime, numSteps)';
+
 
 for step = 1:numSteps
     currentTime = timeVector(step);
@@ -84,41 +84,6 @@ for step = 1:numSteps
         sensor2_azel(1), sensor2_azel(2));
 end
 
-
-%% Create Figure and Axes
-figure(); 
-ax = axes; 
-axis(ax,'equal'); grid(ax,'on'); view(ax,3);
-xlabel(ax,'X'); ylabel(ax,'Y'); zlabel(ax,'Z');
-
-
-%% Initialize Satellite and Sensors Visualization             
-satellite.initVisual(ax, 1.5);
-
-sensor1.initVisual(ax, 0.5);
-sensor2.initVisual(ax, 0.5);
-sensor3.initVisual(ax, 0.5);
-sensor4.initVisual(ax, 0.5);
-sensor5.initVisual(ax, 0.5);
-
-
-%% Animation Loop
-nSteps = 360;              
-for k = 1:nSteps 
-
-    % Update satellite visualization
-    satellite.updateVisual();
-
-    % Update sensors visualization
-    sensor1.updateVisual();
-    sensor2.updateVisual();
-    sensor3.updateVisual();
-    sensor4.updateVisual();
-    sensor5.updateVisual();
-
-    drawnow;
-    pause(0.01);
-end
 
 
 

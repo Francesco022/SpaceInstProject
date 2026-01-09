@@ -142,8 +142,8 @@ classdef Sensor < handle
             Pert_dir=Pert_dir/norm(Pert_dir); %normalizzato, così torna a stare sulla sfera
 
             % Rotate to body frame
-            R = rotmat(obj.attitude, 'frame');
-            Pert_dir = R' * Pert_dir;
+            R = rotmat(quatinv(obj.attitude), 'frame');
+            Pert_dir = R * Pert_dir;
 
             [azb, elb, ~] = cart2sph(Pert_dir(1), Pert_dir(2), Pert_dir(3));
 

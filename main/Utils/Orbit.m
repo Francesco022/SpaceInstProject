@@ -33,8 +33,8 @@ classdef Orbit < handle
             y_body = y_body / norm(y_body);
             x_body = cross(y_body, z_body);
 
-            R = [x_body, y_body, z_body]; % Rotation matrix from body to ECI
-            att = quaternion(R', 'rotmat', 'point'); %#ok<*PROPLC> % Convert to quaternion
+            R = [x_body, y_body, z_body]'; % Rotation matrix from body to ECI
+            att = quaternion(R, 'rotmat', 'frame'); %#ok<*PROPLC> % Convert to quaternion
 
             % Update properties
             obj.pos = pos;
