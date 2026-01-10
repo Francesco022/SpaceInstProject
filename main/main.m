@@ -56,7 +56,7 @@ results = table('Size', [0 2], ...
 
 startTime = datetime(2026,3,20,0,0,0);
 endTime   = datetime(2026,3,20,1,0,0);
-numSteps = 1000;
+numSteps  = 1000;
 
 timeVector = linspace(startTime, endTime, numSteps)';
 
@@ -78,6 +78,8 @@ for step = 1:numSteps
     % Update satellite state
     satellite.setPosition(satPos);
     satellite.setAttitude(satAtt);
+
+    satellite.rotateByEuler([0.1*step, 1, 1]);   % For testing purposes only
     
     % Get sensor az el readings in satellite body frame [az, el, flag] [deg]
     sensor1_azel = sensor1.get_measured_azel(earthVec);
@@ -87,35 +89,54 @@ for step = 1:numSteps
     sensor5_azel = sensor5.get_measured_azel(sunVec);
 
     % Compile all valid measurements
-    measure = [];
-    true_vector = [];
+    % NOTE: if more than one sensor sees the same vector (e.g., sun)
+    %       QUEST algorithm can not handle it properly
+    %       solution is considering them as independent with seme standard deviation take the average
+    measure = [NaN, NaN;   % Horizon
+               NaN, NaN];  % Sun (mean of all sun sensors)
 
-    if sensor1_azel(3) == 1  % Horizon sensor valid
-        measure = [measure; sensor1_azel(1:2)];
-        true_vector = [true_vector; earthVec'];
+    true_vector = [earthVec';
+                   sunVec' ];
+
+    nsun_measurements = 0;
+    sun_sum = [0, 0];
+
+    % Horizon sensor
+    if sensor1_azel(3) == 1
+        measure(1,:) = sensor1_azel(1:2);
     end
-    if sensor2_azel(3) == 1  % Sun sensor 1 valid
-        measure = [measure; sensor2_azel(1:2)];
-        true_vector = [true_vector; sunVec'];
+
+    % Sun sensors
+    if sensor2_azel(3) == 1
+        sun_sum = sun_sum + sensor2_azel(1:2);
+        nsun_measurements = nsun_measurements + 1;
     end
-    if sensor3_azel(3) == 1  % Sun sensor 2 valid
-        measure = [measure; sensor3_azel(1:2)];
-        true_vector = [true_vector; sunVec'];
+    if sensor3_azel(3) == 1
+        sun_sum = sun_sum + sensor3_azel(1:2);
+        nsun_measurements = nsun_measurements + 1;
     end
-    if sensor4_azel(3) == 1  % Sun sensor 3 valid
-        measure = [measure; sensor4_azel(1:2)];
-        true_vector = [true_vector; sunVec'];
+    if sensor4_azel(3) == 1
+        sun_sum = sun_sum + sensor4_azel(1:2);
+        nsun_measurements = nsun_measurements + 1;
     end
-    if sensor5_azel(3) == 1  % Sun sensor 4 valid
-        measure = [measure; sensor5_azel(1:2)];
-        true_vector = [true_vector; sunVec'];
+    if sensor5_azel(3) == 1
+        sun_sum = sun_sum + sensor5_azel(1:2);
+        nsun_measurements = nsun_measurements + 1;
+    end
+
+    % Final sun measurement
+    if nsun_measurements > 0
+        measure(2,:) = sun_sum / nsun_measurements;
     end
 
     % Attitude determination from sensor measurements
     estimate_attitude = measure2attitude(measure, true_vector);
 
-    % Store results in Euler angles 'ZYX' [deg]
+    % Satellite true attitude in Euler angles ZYX [deg]
+    satAtt = satellite.getAttitude();
     satAtt_eul = eulerd(satAtt, 'ZYX', 'frame');
+
+    % Store results in Euler angles 'ZYX' [deg]
     results = [results;
                {satAtt_eul, estimate_attitude}];
 
@@ -123,8 +144,11 @@ end
 
 %% COVARIANCE ANALYSIS OF THE RESULTS
 
-% Calculate attitude errors
+% Calculate attitude errors and wrap them to [-180, 180] [-90, 90] [-180, 180] deg
 attitude_errors = results.True_Attitude_deg - results.Measured_Attitude_deg;
+attitude_errors(:,1) = wrapTo180(attitude_errors(:,1));
+attitude_errors(:,2) = wrapTo180(attitude_errors(:,2));
+attitude_errors(:,3) = wrapTo180(attitude_errors(:,3));
 
 % Bias
 bias = mean(attitude_errors);
@@ -180,44 +204,3 @@ figure(2);
 plot_err_ellipsoid;
 title('3D Attitude Error Ellipsoid');
 
-
-%{
-% (Optional) Display or log the sensor readings
-fprintf('Time: %s\n', datestr(currentTime));
-fprintf('  Sensor 1 (Horizon) Az/El: [%.2f, %.2f] deg\n', sensor1_azel(1), sensor1_azel(2));
-fprintf('  Sensor 2 (Sun 1) Az/El: [%.2f, %.2f] deg\n', sensor2_azel(1), sensor2_azel(2));
-fprintf('  Sensor 3 (Sun 2) Az/El: [%.2f, %.2f] deg\n', sensor3_azel(1), sensor3_azel(2));
-fprintf('  Sensor 4 (Sun 3) Az/El: [%.2f, %.2f] deg\n', sensor4_azel(1), sensor4_azel(2));
-fprintf('  Sensor 5 (Sun 4) Az/El: [%.2f, %.2f] deg\n', sensor5_azel(1), sensor5_azel(2));
-fprintf('\n');
-fprintf('\n');
-
-
-%% Create Figure and Axes
-figure(); 
-ax = axes; 
-axis(ax,'equal'); grid(ax,'on'); view(ax,3);
-xlabel(ax,'X'); ylabel(ax,'Y'); zlabel(ax,'Z');
-
-
-%% Initialize Satellite and Sensors Visualization             
-satellite.initVisual(ax, 1.5);
-
-sensor1.initVisual(ax, 0.5);
-sensor2.initVisual(ax, 0.5);
-sensor3.initVisual(ax, 0.5);
-sensor4.initVisual(ax, 0.5);
-sensor5.initVisual(ax, 0.5);
-
-% Debug simulation
-simTime = datetime(2026,3,20,0,0,0);
-orbit.update_position_and_attitude(simTime);
-
-sat_pos = orbit.get_position();
-sat_att = orbit.get_attitude();
-
-sat_att  = compact(sat_att);
-
-fprintf('Satellite Position (km): [%.2f, %.2f, %.2f]\n', sat_pos(1), sat_pos(2), sat_pos(3));
-fprintf('Satellite Attitude (quaternion): [%.4f, %.4f, %.4f, %.4f]\n', sat_att(1), sat_att(2), sat_att(3), sat_att(4));
-%}
